@@ -1,0 +1,177 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for Authentication & RBAC
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && (
+        request.auth.token.role == role || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == role)
+      );
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isProfessor() {
+      return hasRole('professor') || isAdmin();
+    }
+
+    function isStudent() {
+      return hasRole('student');
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && (
+        request.auth.uid == userId ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().profileId == userId)
+      );
+    }
+
+    // 1. Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.auth.uid == userId && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'profileId'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 2. Students & Professors Profiles
+    match /students/{studentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /professors/{profId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 3. Academic Structure: Branches, Semesters, Divisions, Rooms, Subjects, Courses
+    match /branches/{branchId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /semesters/{semId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /divisions/{divId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 4. Timetables & Lectures
+    match /timetables/{timetableId} {
+      allow read: if isAuthenticated();
+      allow write: if isProfessor() || isAdmin();
+    }
+
+    match /lectures/{lectureId} {
+      allow read: if isAuthenticated();
+      allow write: if isProfessor() || isAdmin();
+    }
+
+    // 5. Attendance Sessions (QR Tokens)
+    match /attendanceSessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isProfessor() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 6. Attendance Records
+    match /attendanceRecords/{recordId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isProfessor() || 
+        resource.data.studentId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.studentId == getUserData().profileId)
+      );
+      // Students cannot directly tamper with attendance records
+      allow write: if isProfessor() || isAdmin();
+    }
+
+    // 7. Leave Applications
+    match /leaveApplications/{leaveId} {
+      allow read: if isAuthenticated() && (
+        isAdmin() || 
+        isProfessor() || 
+        resource.data.studentId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.studentId == getUserData().profileId)
+      );
+      allow create: if isAuthenticated() && (
+        isAdmin() || 
+        request.resource.data.studentId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && request.resource.data.studentId == getUserData().profileId)
+      );
+      allow update: if isProfessor() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 8. Notifications
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && (
+        resource.data.targetRole == 'all' ||
+        resource.data.targetRole == getUserData().role ||
+        resource.data.targetUserId == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if isProfessor() || isAdmin();
+    }
+
+    // 9. Audit Logs (Immutable)
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Immutable audit trail
+    }
+
+    // 10. Academic Calendar & Settings
+    match /academicCalendar/{calId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /collegeSettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 11. Attendance Corrections
+    match /attendanceCorrectionRequests/{corrId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isProfessor() || isAdmin();
+    }
+  }
+}

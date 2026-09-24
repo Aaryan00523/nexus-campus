@@ -1,0 +1,39 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSmallFile() {
+      return request.resource.size < 5 * 1024 * 1024; // 5 MB max
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function isDocument() {
+      return request.resource.contentType.matches('application/pdf') || isImage();
+    }
+
+    // Profile photos
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId) && isSmallFile() && isImage();
+    }
+
+    // Leave application medical certificates / documents
+    match /leave_documents/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId) && isSmallFile() && isDocument();
+    }
+
+    // General campus assets (read-only for students, writable by admins)
+    match /campus_assets/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.token.role == 'admin';
+    }
+  }
+}
