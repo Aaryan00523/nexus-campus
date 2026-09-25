@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, cert, App, applicationDefault } from 'firebase-admin/app';
-import { getAuth, Auth } from 'firebase-admin/auth';
+import type { Auth } from 'firebase-admin/auth';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getStorage, Storage } from 'firebase-admin/storage';
 import fs from 'fs';
@@ -25,11 +25,10 @@ let adminAuthInstance: Auth | null = null;
 let adminDbInstance: Firestore | null = null;
 let adminStorageInstance: Storage | null = null;
 
-function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Firestore | null; storage: Storage | null } {
+function getOrInitFirebaseAdmin(): { app: App | null; db: Firestore | null; storage: Storage | null } {
   if (adminAppInstance) {
     return {
       app: adminAppInstance,
-      auth: adminAuthInstance,
       db: adminDbInstance,
       storage: adminStorageInstance,
     };
@@ -39,7 +38,6 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
   if (existingApps.length > 0) {
     adminAppInstance = existingApps[0]!;
     try {
-      adminAuthInstance = getAuth(adminAppInstance);
       adminDbInstance = getFirestore(adminAppInstance);
       adminDbInstance.settings({ ignoreUndefinedProperties: true });
       adminStorageInstance = getStorage(adminAppInstance);
@@ -48,7 +46,6 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
     }
     return {
       app: adminAppInstance,
-      auth: adminAuthInstance,
       db: adminDbInstance,
       storage: adminStorageInstance,
     };
@@ -72,11 +69,10 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
         }),
         storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`,
       });
-      adminAuthInstance = getAuth(adminAppInstance);
       adminDbInstance = getFirestore(adminAppInstance);
       adminDbInstance.settings({ ignoreUndefinedProperties: true });
       adminStorageInstance = getStorage(adminAppInstance);
-      return { app: adminAppInstance, auth: adminAuthInstance, db: adminDbInstance, storage: adminStorageInstance };
+      return { app: adminAppInstance, db: adminDbInstance, storage: adminStorageInstance };
     } catch (err) {
       console.warn('Firebase cert init failed, trying fallback:', err);
     }
@@ -91,11 +87,10 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
         credential: cert(saData),
         storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`,
       });
-      adminAuthInstance = getAuth(adminAppInstance);
       adminDbInstance = getFirestore(adminAppInstance);
       adminDbInstance.settings({ ignoreUndefinedProperties: true });
       adminStorageInstance = getStorage(adminAppInstance);
-      return { app: adminAppInstance, auth: adminAuthInstance, db: adminDbInstance, storage: adminStorageInstance };
+      return { app: adminAppInstance, db: adminDbInstance, storage: adminStorageInstance };
     }
   } catch (err) {
     console.warn('Local service-account.json read notice:', err);
@@ -108,11 +103,10 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
       projectId,
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`,
     });
-    adminAuthInstance = getAuth(adminAppInstance);
     adminDbInstance = getFirestore(adminAppInstance);
     adminDbInstance.settings({ ignoreUndefinedProperties: true });
     adminStorageInstance = getStorage(adminAppInstance);
-    return { app: adminAppInstance, auth: adminAuthInstance, db: adminDbInstance, storage: adminStorageInstance };
+    return { app: adminAppInstance, db: adminDbInstance, storage: adminStorageInstance };
   } catch (err) {
     // Expected to fail on non-GCP serverless like Vercel if ADC is absent
   }
@@ -123,7 +117,6 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
       projectId,
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${projectId}.firebasestorage.app`,
     });
-    adminAuthInstance = getAuth(adminAppInstance);
     adminDbInstance = getFirestore(adminAppInstance);
     adminStorageInstance = getStorage(adminAppInstance);
   } catch (finalErr) {
@@ -132,16 +125,45 @@ function getOrInitFirebaseAdmin(): { app: App | null; auth: Auth | null; db: Fir
 
   return {
     app: adminAppInstance,
-    auth: adminAuthInstance,
     db: adminDbInstance,
     storage: adminStorageInstance,
   };
 }
 
-const { app: adminApp, auth: rawAuth, db: rawDb, storage: rawStorage } = getOrInitFirebaseAdmin();
+const { app: adminApp, db: rawDb, storage: rawStorage } = getOrInitFirebaseAdmin();
+
+export async function getAdminAuth(): Promise<Auth | null> {
+  if (adminAuthInstance) return adminAuthInstance;
+  const targetApp = adminAppInstance || getApps()[0];
+  if (!targetApp) return null;
+  try {
+    const { getAuth } = await import('firebase-admin/auth');
+    adminAuthInstance = getAuth(targetApp);
+    return adminAuthInstance;
+  } catch (err) {
+    console.warn('Dynamic firebase-admin/auth import notice:', err);
+    return null;
+  }
+}
+
+// Resilient proxy so code calling adminAuth methods never breaks module loading
+export const adminAuth: Auth = new Proxy({} as Auth, {
+  get(_target, prop: string | symbol) {
+    return async (...args: any[]) => {
+      try {
+        const auth = await getAdminAuth();
+        if (auth && typeof (auth as any)[prop] === 'function') {
+          return await (auth as any)[prop](...args);
+        }
+      } catch (err) {
+        console.warn(`adminAuth.${String(prop)} warning:`, err);
+      }
+      return null;
+    };
+  },
+});
 
 export const adminAppSafe = adminApp;
-export const adminAuth = rawAuth as Auth;
 export const adminDb = rawDb as Firestore;
 export const adminStorage = rawStorage as Storage;
 export default adminApp;

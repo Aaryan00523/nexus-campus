@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
       try {
         if (adminAuth && typeof adminAuth.verifyIdToken === 'function') {
           const decoded = await adminAuth.verifyIdToken(token);
-          if (decoded.uid) {
+          if (decoded && decoded.uid) {
             const user = campusDb.getUserById(decoded.uid) || (decoded.email ? campusDb.getUserByEmail(decoded.email) : undefined);
             if (user) {
               effectiveUserId = user.id;
