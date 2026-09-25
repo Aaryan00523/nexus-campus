@@ -7,23 +7,58 @@ import MobileNav from '@/components/layout/MobileNav';
 import DemoSwitcher from '@/components/shared/DemoSwitcher';
 import { User } from '@/lib/types';
 
+const DEFAULT_PROFESSOR: User = {
+  id: 'prof_1',
+  name: 'Dr. Vikram Roy',
+  email: 'vikram.roy@aits.edu',
+  role: 'professor',
+  department: 'Computer Science & Engineering',
+  designation: 'Professor & Head of Department',
+  assignedSubjectIds: ['sub_math3'],
+  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=256',
+};
+
 export default function ProfessorLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const timer = setTimeout(() => {
+      if (isMounted) {
+        setUser((prev) => prev || DEFAULT_PROFESSOR);
+      }
+    }, 1500);
+
     fetch('/api/auth/me')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.user && data.user.role === 'professor') {
+        if (!isMounted) return;
+        if (data?.user && data.user.role === 'professor') {
           setUser(data.user);
         } else {
           // Default to primary professor demo user (Dr. Vikram Roy)
           fetch('/api/auth/me?userId=prof_1')
-            .then((r) => r.json())
-            .then((d) => setUser(d.user));
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              if (isMounted) {
+                setUser(d?.user || DEFAULT_PROFESSOR);
+              }
+            })
+            .catch(() => {
+              if (isMounted) setUser((prev) => prev || DEFAULT_PROFESSOR);
+            });
         }
       })
-      .catch((e) => console.error(e));
+      .catch(() => {
+        if (isMounted) setUser((prev) => prev || DEFAULT_PROFESSOR);
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   if (!user) {

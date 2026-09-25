@@ -7,23 +7,57 @@ import MobileNav from '@/components/layout/MobileNav';
 import DemoSwitcher from '@/components/shared/DemoSwitcher';
 import { User } from '@/lib/types';
 
+const DEFAULT_ADMIN: User = {
+  id: 'user_admin_1',
+  name: 'Dr. Robert Sterling',
+  email: 'dean.sterling@aits.edu',
+  role: 'admin',
+  department: 'Office of Academic Affairs',
+  designation: 'Dean of Academic Administration',
+  avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=256',
+};
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const timer = setTimeout(() => {
+      if (isMounted) {
+        setUser((prev) => prev || DEFAULT_ADMIN);
+      }
+    }, 1500);
+
     fetch('/api/auth/me')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.user && data.user.role === 'admin') {
+        if (!isMounted) return;
+        if (data?.user && data.user.role === 'admin') {
           setUser(data.user);
         } else {
           // Default to primary admin user (Dean Robert Sterling)
           fetch('/api/auth/me?userId=user_admin_1')
-            .then((r) => r.json())
-            .then((d) => setUser(d.user));
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              if (isMounted) {
+                setUser(d?.user || DEFAULT_ADMIN);
+              }
+            })
+            .catch(() => {
+              if (isMounted) setUser((prev) => prev || DEFAULT_ADMIN);
+            });
         }
       })
-      .catch((e) => console.error(e));
+      .catch(() => {
+        if (isMounted) setUser((prev) => prev || DEFAULT_ADMIN);
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   if (!user) {

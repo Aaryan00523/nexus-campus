@@ -7,23 +7,62 @@ import MobileNav from '@/components/layout/MobileNav';
 import DemoSwitcher from '@/components/shared/DemoSwitcher';
 import { User } from '@/lib/types';
 
+const DEFAULT_STUDENT: User = {
+  id: 'stud_1',
+  name: 'Aaryan Sharma',
+  email: 'aaryan.sharma@student.aits.edu',
+  role: 'student',
+  enrollmentNo: 'CS-2024-001',
+  department: 'Computer Science & Engineering',
+  branchId: 'branch_cs',
+  semester: 3,
+  division: 'A',
+  phone: '+1 (555) 782-9011',
+  avatarUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=256',
+};
+
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
+    // Safety timeout ensures the portal never hangs on cold start
+    const timer = setTimeout(() => {
+      if (isMounted) {
+        setUser((prev) => prev || DEFAULT_STUDENT);
+      }
+    }, 1500);
+
     fetch('/api/auth/me')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.user && data.user.role === 'student') {
+        if (!isMounted) return;
+        if (data?.user && data.user.role === 'student') {
           setUser(data.user);
         } else {
           // Default to primary student demo user
           fetch('/api/auth/me?userId=stud_1')
-            .then((r) => r.json())
-            .then((d) => setUser(d.user));
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              if (isMounted) {
+                setUser(d?.user || DEFAULT_STUDENT);
+              }
+            })
+            .catch(() => {
+              if (isMounted) setUser((prev) => prev || DEFAULT_STUDENT);
+            });
         }
       })
-      .catch((e) => console.error(e));
+      .catch(() => {
+        if (isMounted) setUser((prev) => prev || DEFAULT_STUDENT);
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   if (!user) {
